@@ -15,6 +15,13 @@ class LossCandidate:
     evidence_text: str | None = None
     evidence_locator: str | None = None
     review_status: str = "needs_review"
+    observation_date: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    operator: str = "="
+    amount_type: str | None = None
+    cumulative: bool = False
+    classification_confidence: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "LossCandidate":
@@ -32,6 +39,15 @@ class LossCandidate:
             evidence_text=_optional_text(value.get("evidence_text")),
             evidence_locator=_optional_text(value.get("evidence_locator")),
             review_status=_optional_text(value.get("review_status")) or "needs_review",
+            observation_date=_optional_text(value.get("observation_date")),
+            period_start=_optional_text(value.get("period_start")),
+            period_end=_optional_text(value.get("period_end")),
+            operator=_optional_text(value.get("operator")) or "=",
+            amount_type=_optional_text(value.get("amount_type")),
+            cumulative=_as_bool(value.get("cumulative")),
+            classification_confidence=_optional_text(
+                value.get("classification_confidence")
+            ),
         )
 
 
@@ -44,8 +60,11 @@ class SourceRecord:
     incident_date: str | None = None
     published_date: str | None = None
     incident_type: str | None = None
+    event: str | None = None
+    incident_key: str | None = None
     individuals_affected: int | None = None
     losses: tuple[LossCandidate, ...] = field(default_factory=tuple)
+    company_features: Mapping[str, Any] = field(default_factory=dict, compare=False)
     raw: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
     @classmethod
@@ -70,8 +89,11 @@ class SourceRecord:
             incident_date=_optional_text(value.get("incident_date")),
             published_date=_optional_text(value.get("published_date")),
             incident_type=_optional_text(value.get("incident_type")),
+            event=_optional_text(value.get("event")),
+            incident_key=_optional_text(value.get("incident_key")),
             individuals_affected=individuals_affected,
             losses=tuple(LossCandidate.from_mapping(item) for item in loss_values),
+            company_features=dict(value.get("company_features") or {}),
             raw=dict(value),
         )
 
@@ -81,3 +103,13 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().casefold() in {"1", "true", "yes", "y"}
