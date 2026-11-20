@@ -25,7 +25,7 @@ Malicious Attack,Malicious System Failure,Intentional Crash,needs_review,Too bro
 Ransomware,Ransomware,,canonical,Target category
 Digital Extortion,Ransomware,Digital Extortion,canonical,Target subcategory
 Ransom demand,Ransomware,Digital Extortion,needs_review,Demand is not proof of payment or incurred loss
-Ransom payment,Ransomware,Digital Extortion,approved_alias,Requires source evidence that payment occurred
+Ransom payment,Ransomware,Digital Extortion,needs_review,Requires source evidence that payment occurred
 Economic Loss,,,needs_review,Legacy aggregate is broader than the target taxonomy
 Litigation Costs,Incident Response,Legal,needs_review,May be defense cost settlement or damages and requires evidence review
 Regulatory fine,Privacy Liability,,needs_review,Regulator and incident relationship must be verified

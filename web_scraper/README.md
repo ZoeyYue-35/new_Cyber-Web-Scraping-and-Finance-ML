@@ -1,26 +1,34 @@
 # Cyber Loss Intelligence Pipeline
 
-This directory contains the starter infrastructure for the cyber loss web-scraping project. It is intentionally small and testable. It does not claim that any live website collector is working yet.
+This package collects public cyber-incident notices and SEC filings, preserves source
+versions and monetary evidence, and exports an auditable research workbook. The
+database is the source of truth; exports can be regenerated at any time.
 
-## What works now
+## What the pipeline does
 
-- Imports normalized source records from a local JSONL file.
-- Stores incidents, original source records, source versions, loss observations, update history, and review items in SQLite.
-- Detects `new`, `updated`, and `unchanged` source records using stable identifiers and SHA-256 content hashes.
-- Preserves older loss observations rather than silently overwriting revised amounts.
-- Maps reported loss terms through a configurable taxonomy table.
-- Sends uncertain mappings to the review queue.
-- Exports research CSV files, including a wide company-by-loss-category table.
-- Runs entirely with the Python standard library.
+- Fetches the California Attorney General's public breach-list CSV.
+- Fetches SEC submissions and Company Facts for explicitly configured CIKs, then
+  screens recent 8-K, 10-Q, and 10-K filings for cyber-related financial evidence.
+- Preserves raw source records and versions in SQLite, and avoids duplicate
+  observations when the same filings are collected again.
+- Keeps SEC text-extraction candidates in `Unallocated Cyber Loss` for review.
+  Heuristically extracted amounts are not model-ready.
+- Tracks cumulative observations as history and marks only the latest dated
+  observation per incident, target field, observed term, and amount type as current.
+- Exports the 21-column `Loss Observations` sheet and a separate `Company Features`
+  sheet for X variables from the supplied report: location, industry, multi-year
+  revenue, employees, breach history, exposed record counts, regulatory exposure,
+  insurance coverages, security assessments, and controls. SEC SIC, revenue, employee
+  count, CIK, ticker, and address are populated when available; other fields remain
+  blank until a source record actually reports them.
+- Leaves missing values blank. A missing disclosure is never treated as zero.
 
-## What is not implemented yet
-
-- Live HHS OCR, SEC EDGAR, VCDB, California AG, or other collectors.
-- Cross-source entity resolution for incidents reported by several sources.
-- PDF loss extraction or LLM-assisted classification.
-- Automatic conversion into the repository's legacy aggregate CSV files.
-
-The live collectors remain disabled until their access method, rate limits, terms, and schemas have been verified.
+The pipeline does not yet resolve one incident reported by multiple sources, scrape
+or redistribute sources whose access terms have not been reviewed, or infer a
+company's industry/revenue when SEC facts are unavailable. California AG records
+are incident candidates and do not by themselves provide monetary loss observations.
+The SEC collector is scoped to the CIKs configured below; it does not crawl every
+public company.
 
 ## Setup
 
@@ -33,7 +41,44 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-## Commands
+## Weekly live run
+
+Set at least one SEC CIK in `config/sources.toml` to enable SEC collection:
+
+```toml
+[[sources]]
+key = "sec_edgar"
+# ...
+enabled = true
+ciks = ["0000731766", "0000789570"]
+lookback_days = 30
+```
+
+The sample CIKs are UnitedHealth Group and MGM Resorts from the reference workbook;
+replace them with the companies in your intended training population. SEC requires
+a descriptive User-Agent containing a real contact email:
+
+```bash
+export SEC_USER_AGENT="Your Name your.real.email@example.edu"
+python -m cyber_loss_pipeline --mode weekly
+```
+
+`weekly` collects enabled sources and regenerates exports under `data/processed`.
+When no CIKs are configured, SEC is explicitly reported as skipped; the California
+AG collector still runs. Collection errors are raised and return a failed command.
+
+Schedule the command with the host's scheduler (for example, cron every Monday at
+03:00 UTC). Keep the database and output directory on persistent storage, and
+provide `SEC_USER_AGENT` in the scheduler environment:
+
+```cron
+0 3 * * 1 cd /path/to/web_scraper && SEC_USER_AGENT="Your Name your.real.email@example.edu" /path/to/web_scraper/.venv/bin/python -m cyber_loss_pipeline --mode weekly
+```
+
+The 30-day SEC lookback intentionally overlaps weekly runs. Stable source IDs and
+content hashes make repeated runs idempotent while retaining revised disclosures.
+
+## Other commands
 
 Initialize an empty database:
 
@@ -41,7 +86,7 @@ Initialize an empty database:
 python -m cyber_loss_pipeline --mode init
 ```
 
-Import a JSONL backfill:
+Import normalized, authorized JSONL records:
 
 ```bash
 python -m cyber_loss_pipeline \
@@ -49,45 +94,71 @@ python -m cyber_loss_pipeline \
   --input path/to/authorized_source_records.jsonl
 ```
 
-Run an incremental import of the same source format:
+Re-export without collecting:
 
 ```bash
-python -m cyber_loss_pipeline \
-  --mode update \
-  --input path/to/authorized_source_records.jsonl
+python -m cyber_loss_pipeline --mode export --output-dir data/processed
 ```
 
-Export research CSV files:
-
-```bash
-python -m cyber_loss_pipeline \
-  --mode export \
-  --output-dir data/processed
-```
-
-Default database: `data/cyber_loss.sqlite`
+Default database: `data/processed/cyber_loss.sqlite`
 
 Default taxonomy: `config/taxonomy_mapping.csv`
 
+## Output files
+
+- `loss_observations.xlsx`
+  - `Loss Observations`: one row per monetary evidence observation and exactly 21
+    fields; includes the source URL, evidence locator, raw observed term, amount
+    bound, cumulative flag, snapshot status, and review/model-readiness flags.
+  - `Company Features`: fixed X-variable fields aligned to the supplied report.
+    Public SEC features are populated where available; self-reported and control
+    fields stay blank unless a source explicitly supplies them. Contact emails and
+    phone numbers are not included as model features.
+- `incidents.csv`: incident candidates, including notices without a disclosed loss.
+- `incident_sources.csv`: source IDs, source URLs, content hashes, and fetch times.
+- `loss_observations.csv`: machine-readable copy of the full observation table.
+- `review_queue.csv`: ambiguous or low-confidence observations requiring review.
+- `model_input_wide.csv`: one incident per row, X firmographics plus approved
+  current Y loss totals. `needs_review`, bounds, and older cumulative snapshots are
+  excluded from model-ready totals.
+
+The fixed `Loss Observations` column order is:
+
+`Observation ID`, `Incident ID`, `Company`, `Event`, `Observation Date`,
+`Period Start`, `Period End`, `Target Field`, `Observed Term`, `Amount`, `Currency`,
+`Operator`, `Amount Type`, `Cumulative?`, `Current Snapshot?`, `Model Ready?`,
+`Classification Confidence`, `Evidence Summary`, `Source URL`, `Source Location`,
+`Retrieved At`.
+
 ## JSONL input contract
 
-Each line is one source record. A source record can contain zero or more loss observations.
+Each line is one source record. A source record can contain zero or more loss
+observations and optional company features:
 
 ```json
 {
   "source_name": "source_key",
   "source_record_id": "stable-record-id",
+  "incident_key": "stable-incident-id",
   "source_url": "https://example.org/record/stable-record-id",
   "company_name": "Company name as reported",
+  "event": "Named incident",
   "incident_date": "2025-01-15",
   "published_date": "2025-02-01",
-  "incident_type": "Hacking/IT Incident",
-  "individuals_affected": 1000,
+  "company_features": {
+    "industry": "Industry as reported",
+    "revenue": "125000000",
+    "revenue_currency": "USD",
+    "revenue_period": "2024-12-31"
+  },
   "losses": [
     {
       "amount": "125000.00",
       "currency": "USD",
       "reported_term": "Forensic investigation costs",
+      "operator": "=",
+      "amount_type": "Actual / incurred",
+      "cumulative": false,
       "evidence_text": "Short source-backed evidence excerpt",
       "evidence_locator": "page 4",
       "review_status": "needs_review"
@@ -96,20 +167,26 @@ Each line is one source record. A source record can contain zero or more loss ob
 }
 ```
 
-Missing monetary amounts must stay missing. Do not encode an unknown amount as zero.
+Use `null` or omit unknown values. Do not encode missing monetary amounts as zero.
+An observation with no confident taxonomy match is exported as `Unallocated Cyber
+Loss` and added to the review queue. Only confirmed or approved exact mappings with
+an exact amount can enter model-ready totals.
 
-## Export files
+The JSONL `company_features` object can supply any of the `Company Features` fields
+using their snake_case column keys. Unsupported keys are ignored rather than
+silently treated as model variables.
 
-- `incidents.csv`: one internal incident record per imported source record at this stage.
-- `incident_sources.csv`: source URL, source identifier, hashes, and observation timestamps.
-- `loss_observations.csv`: one row per observed loss amount with evidence and review status.
-- `review_queue.csv`: ambiguous mappings and other items needing human review.
-- `model_input_wide.csv`: one row per incident, with the seven target loss categories as columns.
+## Source registry status
 
-`model_input_wide.csv` excludes `needs_review` observations. This prevents ambiguous classifications from entering modeling data automatically.
+The California AG CSV and the SEC CIK-based collector are enabled. HHS OCR, Privacy
+Rights Clearinghouse, VCDB, ransomware feeds, European DPAs, CISA, and Wikipedia
+remain disabled because their schemas, access terms, redistribution permissions,
+or tested adapters are not yet cleared. An enabled source without a collector is an
+error rather than silently falling back to an empty result.
 
 ## Relationship to the existing model
 
-The existing prediction code currently reads legacy aggregate CSV files such as `economic_loss.csv`, `response_costs.csv`, `litigated_cases.csv`, and `fines_penalties.csv`. Those files use a different classification system from Professor Arora's target taxonomy.
-
-This starter pipeline therefore exports a clean research layer first. It does not overwrite the legacy files. See `docs/model_integration.md` for the proposed integration boundary.
+The legacy prediction code reads aggregate files such as `economic_loss.csv`,
+`response_costs.csv`, `litigated_cases.csv`, and `fines_penalties.csv`. This pipeline
+does not overwrite those files. See [model integration](docs/model_integration.md)
+for the separation and remaining decisions.

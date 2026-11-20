@@ -39,10 +39,20 @@ class Taxonomy:
 
     def match(self, reported_term: str | None) -> TaxonomyMatch:
         if not reported_term:
-            return TaxonomyMatch(None, None, "needs_review", "Missing reported loss term")
+            return TaxonomyMatch(
+                "Unallocated Cyber Loss",
+                None,
+                "needs_review",
+                "Missing reported loss term",
+            )
         return self._by_source_term.get(
             reported_term.strip().casefold(),
-            TaxonomyMatch(None, None, "needs_review", "No configured taxonomy mapping"),
+            TaxonomyMatch(
+                "Unallocated Cyber Loss",
+                None,
+                "needs_review",
+                "No configured taxonomy mapping",
+            ),
         )
 
     def validate(self, category: str, subcategory: str | None) -> bool:

@@ -1,5 +1,4 @@
-# Source registry. A source remains disabled until its access method, terms,
-# rate limits, and schema have been verified and a tested collector exists.
+# Sources without a tested collector or reviewed access path remain disabled.
 
 [[sources]]
 key = "hhs_ocr"
@@ -22,16 +21,21 @@ key = "sec_edgar"
 name = "SEC EDGAR"
 landing_url = "https://www.sec.gov/search-filings/edgar-application-programming-interfaces"
 role = "incident_and_financial_disclosure"
-implementation_status = "planned"
-enabled = false
+implementation_status = "implemented_configure_ciks_and_sec_user_agent"
+enabled = true
+collector = "sec_edgar"
+ciks = []
+lookback_days = 30
 
 [[sources]]
 key = "state_attorneys_general"
-name = "State Attorneys General Breach Logs"
+name = "California Attorney General Data Breach List"
 landing_url = "https://www.oag.ca.gov/privacy/databreach/list"
 role = "incident_metadata_and_notice_documents"
-implementation_status = "planned"
-enabled = false
+implementation_status = "implemented"
+enabled = true
+collector = "california_ag_csv"
+data_url = "https://www.oag.ca.gov/privacy/databreach/list-export"
 
 [[sources]]
 key = "vcdb"

@@ -5,15 +5,29 @@ import json
 from pathlib import Path
 
 from .export import export_all
-from .pipeline import run_jsonl
+from .pipeline import run_jsonl, run_weekly
 from .storage import Store
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Cyber loss research data pipeline")
-    parser.add_argument("--mode", required=True, choices=("init", "backfill", "update", "export"))
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=("init", "backfill", "update", "export", "weekly"),
+    )
     parser.add_argument("--input", type=Path, help="Authorized normalized JSONL input")
-    parser.add_argument("--db", type=Path, default=Path("data/cyber_loss.sqlite"))
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=Path("data/processed/cyber_loss.sqlite"),
+    )
+    parser.add_argument(
+        "--sources",
+        type=Path,
+        default=Path("config/sources.toml"),
+        help="Live source registry used by weekly mode",
+    )
     parser.add_argument(
         "--taxonomy",
         type=Path,
@@ -35,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.input is None:
             raise SystemExit("--input is required for backfill and update modes")
         result = run_jsonl(args.input, args.db, args.taxonomy)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.mode == "weekly":
+        result = run_weekly(args.sources, args.db, args.taxonomy, args.output_dir)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
